@@ -1,6 +1,7 @@
 package com.ncclab.tsubaki.data.scanner.strategy
 
 import android.annotation.SuppressLint
+import android.graphics.Bitmap
 import android.util.Log
 import androidx.camera.core.ImageProxy
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
@@ -41,6 +42,18 @@ class MLKitScannerStrategy : ScannerStrategy {
             imageProxy.close()
             onResult(emptyList())
         }
+    }
+
+    override fun analyzeImage(bitmap: Bitmap, onResult: (List<ScanResult>) -> Unit) {
+        val image = InputImage.fromBitmap(bitmap, 0)
+        scanner.process(image)
+            .addOnSuccessListener { barcodes ->
+                val scanResults = barcodes.mapNotNull { it.toScanResult() }
+                onResult(scanResults)
+            }
+            .addOnFailureListener {
+                onResult(emptyList())
+            }
     }
 
     override fun release() {

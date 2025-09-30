@@ -1,12 +1,19 @@
 package com.ncclab.tsubaki.data.scanner.strategy
 
 import android.annotation.SuppressLint
+import android.graphics.Bitmap
+import com.google.zxing.MultiFormatReader
+import com.google.zxing.Reader
 import android.util.Log
 import androidx.camera.core.ImageProxy
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.common.InputImage
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.NotFoundException
+import com.google.zxing.RGBLuminanceSource
+import com.google.zxing.common.HybridBinarizer
 import com.ncclab.tsubaki.data.model.ScanResult
 
 class MLKitScannerStrategyBak : ScannerStrategy {
@@ -19,6 +26,7 @@ class MLKitScannerStrategyBak : ScannerStrategy {
         )
         .build()
     private val scanner = BarcodeScanning.getClient(options)
+    private val reader: Reader = MultiFormatReader()
 
     @SuppressLint("UnsafeOptInUsageError")
     override fun analyze(imageProxy: ImageProxy, onResult: (List<ScanResult>) -> Unit) {
@@ -29,19 +37,12 @@ class MLKitScannerStrategyBak : ScannerStrategy {
 
             scanner.process(image)
                 .addOnSuccessListener { barcodes ->
-                    // ✅ 修正1：把日志移到循环外面
                     Log.d("TsubakiScan", "MLKit: Success. Found ${barcodes.size} barcodes.")
-
-                    // ✅ 修正2：即使barcodes不为空，也要检查map转换后的结果
                     val scanResults = barcodes.mapNotNull { it.toScanResult() }
-
-                    // 无论转换后结果是否为空，都调用 onResult
-                    // 如果 barcodes 为空，scanResults 自然也为空，这个调用是安全的
                     onResult(scanResults)
                 }
                 .addOnFailureListener { e ->
                     Log.e("TsubakiScan", "MLKit: Barcode scanning failed", e)
-                    // ✅ 修正3：在失败时也调用 onResult，并传递空列表
                     onResult(emptyList())
                 }
                 .addOnCompleteListener {
@@ -51,6 +52,31 @@ class MLKitScannerStrategyBak : ScannerStrategy {
         } else {
             imageProxy.close()
             // 在 mediaImage 为空时也通知上层
+            onResult(emptyList())
+        }
+    }
+
+    override fun analyzeImage(bitmap: Bitmap, onResult: (List<ScanResult>) -> Unit) {
+        try {
+            val width = bitmap.width
+            val height = bitmap.height
+            val pixels = IntArray(width * height)
+            bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+
+            val luminanceSource = RGBLuminanceSource(width, height, pixels)
+            val binaryBitmap = BinaryBitmap(HybridBinarizer(luminanceSource))
+            val result = reader.decode(binaryBitmap)
+
+            val scanResult = ScanResult(
+                rawValue = result.text,
+                format = result.barcodeFormat.toString(),
+                timestamp = System.currentTimeMillis()
+            )
+            onResult(listOf(scanResult))
+        } catch (e: NotFoundException) {
+            onResult(emptyList())
+        } catch (e: Exception) {
+            Log.e("ZXingScanner", "ZXing bitmap decoding failed", e)
             onResult(emptyList())
         }
     }

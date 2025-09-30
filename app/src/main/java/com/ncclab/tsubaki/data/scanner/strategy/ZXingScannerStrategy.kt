@@ -1,5 +1,6 @@
 package com.ncclab.tsubaki.data.scanner.strategy
 
+import android.graphics.Bitmap
 import android.util.Log
 import androidx.camera.core.ImageProxy
 import com.google.zxing.BarcodeFormat
@@ -10,15 +11,14 @@ import com.google.zxing.NotFoundException
 import com.google.zxing.PlanarYUVLuminanceSource
 import com.google.zxing.common.HybridBinarizer
 import com.ncclab.tsubaki.data.model.ScanResult
+import com.google.zxing.RGBLuminanceSource
 import java.util.EnumMap
 
 class ZXingScannerStrategy : ScannerStrategy {
-    // 将字节数组声明为成员变量以复用，避免重复内存分配
     private var yuvBytes: ByteArray? = null
 
     private val reader = MultiFormatReader().apply {
         val hints = EnumMap<DecodeHintType, Any>(DecodeHintType::class.java).apply {
-            // ✅ 修正：明确指定要解码的格式，提升效率
             put(DecodeHintType.POSSIBLE_FORMATS, listOf(
                 BarcodeFormat.QR_CODE,
                 BarcodeFormat.CODE_128,
@@ -46,8 +46,32 @@ class ZXingScannerStrategy : ScannerStrategy {
         } catch (e: Exception) {
             Log.e("ZXingScanner", "ZXing decoding failed", e)
         } finally {
-            // 确保 imageProxy 总是被关闭
             imageProxy.close()
+        }
+    }
+
+    override fun analyzeImage(bitmap: Bitmap, onResult: (List<ScanResult>) -> Unit) {
+        try {
+            val width = bitmap.width
+            val height = bitmap.height
+            val pixels = IntArray(width * height)
+            bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+
+            val luminanceSource = RGBLuminanceSource(width, height, pixels)
+            val binaryBitmap = BinaryBitmap(HybridBinarizer(luminanceSource))
+            val result = reader.decodeWithState(binaryBitmap)
+
+            val scanResult = ScanResult(
+                rawValue = result.text,
+                format = result.barcodeFormat.toString(),
+                timestamp = System.currentTimeMillis()
+            )
+            onResult(listOf(scanResult))
+        } catch (e: NotFoundException) {
+            onResult(emptyList())
+        } catch (e: Exception) {
+            Log.e("ZXingScanner", "ZXing bitmap decoding failed", e)
+            onResult(emptyList())
         }
     }
 
@@ -73,11 +97,11 @@ class ZXingScannerStrategy : ScannerStrategy {
 
         return PlanarYUVLuminanceSource(
             bytes,
-            yPlane.rowStride,
-            height,          // 这里使用 imageProxy 的 height
+            width,
+            height,
             0,
             0,
-            width,           // 这里使用 imageProxy 的 width
+            width,
             height,
             false
         )
