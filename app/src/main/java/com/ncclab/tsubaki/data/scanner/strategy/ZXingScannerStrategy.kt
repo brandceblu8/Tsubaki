@@ -1,7 +1,10 @@
 package com.ncclab.tsubaki.data.scanner.strategy
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.os.Build
 import android.util.Log
+import androidx.annotation.RequiresApi
 import androidx.camera.core.ImageProxy
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.BinaryBitmap
@@ -31,9 +34,13 @@ class ZXingScannerStrategy : ScannerStrategy {
 
     override fun analyze(imageProxy: ImageProxy, onResult: (List<ScanResult>) -> Unit) {
         try {
-            val luminanceSource = imageProxy.toLuminanceSource() ?: return // 如果转换失败则提前返回
+            Log.d("ZXingScanner", "Starting analysis, image size: ${imageProxy.width}x${imageProxy.height}")
+
+            val luminanceSource = imageProxy.toLuminanceSource() ?: return
             val binaryBitmap = BinaryBitmap(HybridBinarizer(luminanceSource))
             val result = reader.decodeWithState(binaryBitmap)
+
+            Log.d("ZXingScanner", "Successfully decoded: ${result.text}")
 
             val scanResult = ScanResult(
                 rawValue = result.text,
@@ -50,16 +57,47 @@ class ZXingScannerStrategy : ScannerStrategy {
         }
     }
 
+    // 完全替换 ZXingScannerStrategy.kt 中的 analyzeImage 方法
+    @RequiresApi(Build.VERSION_CODES.O)
     override fun analyzeImage(bitmap: Bitmap, onResult: (List<ScanResult>) -> Unit) {
         try {
-            val width = bitmap.width
-            val height = bitmap.height
-            val pixels = IntArray(width * height)
-            bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+            Log.d("ZXingScanner", "Analyzing bitmap, config: ${bitmap.config}, size: ${bitmap.width}x${bitmap.height}")
 
+            // 创建一个新的软件 Bitmap
+            val softwareBitmap = when {
+                bitmap.config == Bitmap.Config.HARDWARE -> {
+                    Log.d("ZXingScanner", "Converting HARDWARE bitmap to software bitmap")
+                    // 创建一个新的软件配置的 Bitmap
+                    val newBitmap = Bitmap.createBitmap(bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
+                    val canvas = android.graphics.Canvas(newBitmap)
+                    canvas.drawBitmap(bitmap, 0f, 0f, null)
+                    newBitmap
+                }
+                bitmap.config == null -> {
+                    Log.d("ZXingScanner", "Bitmap config is null, creating ARGB_8888 copy")
+                    bitmap.copy(Bitmap.Config.ARGB_8888, false)
+                }
+                else -> {
+                    Log.d("ZXingScanner", "Using original bitmap with config: ${bitmap.config}")
+                    bitmap
+                }
+            }
+
+            val width = softwareBitmap.width
+            val height = softwareBitmap.height
+            val pixels = IntArray(width * height)
+
+            Log.d("ZXingScanner", "Getting pixels from bitmap")
+            softwareBitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+
+            Log.d("ZXingScanner", "Creating luminance source")
             val luminanceSource = RGBLuminanceSource(width, height, pixels)
             val binaryBitmap = BinaryBitmap(HybridBinarizer(luminanceSource))
+
+            Log.d("ZXingScanner", "Attempting to decode")
             val result = reader.decodeWithState(binaryBitmap)
+
+            Log.d("ZXingScanner", "Successfully decoded bitmap: ${result.text}")
 
             val scanResult = ScanResult(
                 rawValue = result.text,
@@ -67,7 +105,14 @@ class ZXingScannerStrategy : ScannerStrategy {
                 timestamp = System.currentTimeMillis()
             )
             onResult(listOf(scanResult))
+
+            // 如果我们创建了新的 Bitmap，需要回收它
+            if (softwareBitmap != bitmap) {
+                softwareBitmap.recycle()
+            }
+
         } catch (e: NotFoundException) {
+            Log.d("ZXingScanner", "No barcode found in bitmap")
             onResult(emptyList())
         } catch (e: Exception) {
             Log.e("ZXingScanner", "ZXing bitmap decoding failed", e)
@@ -80,12 +125,10 @@ class ZXingScannerStrategy : ScannerStrategy {
     }
 
     private fun ImageProxy.toLuminanceSource(): PlanarYUVLuminanceSource? {
-        // ✅ 修正：从 planes 数组中获取第一个平面
         val yPlane = planes.firstOrNull() ?: return null
         val yBuffer = yPlane.buffer
         val ySize = yBuffer.remaining()
 
-        // ✅ 优化：复用 ByteArray 以减少垃圾回收
         val bytes = yuvBytes.let {
             if (it == null || it.size < ySize) {
                 ByteArray(ySize).also { newBytes -> yuvBytes = newBytes }
