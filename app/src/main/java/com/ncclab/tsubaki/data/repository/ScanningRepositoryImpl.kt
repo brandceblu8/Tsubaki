@@ -1,5 +1,6 @@
 package com.ncclab.tsubaki.data.repository
 
+import android.graphics.Bitmap
 import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import com.ncclab.tsubaki.data.feature.FeatureFlagProvider
@@ -30,7 +31,18 @@ class ScanningRepositoryImpl @Inject constructor(
 
         activeScanner?.analyze(imageProxy) { results ->
             if (results.isNotEmpty()) {
-                // ✅ 现在赋值给 StateFlow 总是成功的
+                _scanResults.value = results
+            }
+        }
+    }
+
+    override fun scanFromBitmap(bitmap: Bitmap) {
+        if (activeScanner == null) {
+            activeScanner = scannerFactory.create(featureFlagProvider.getActiveEngine())
+        }
+
+        activeScanner?.analyzeImage(bitmap) { results ->
+            if (results.isNotEmpty()) {
                 _scanResults.value = results
             }
         }

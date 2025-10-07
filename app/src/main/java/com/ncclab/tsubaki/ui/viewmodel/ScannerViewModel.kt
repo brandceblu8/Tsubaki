@@ -1,5 +1,6 @@
 package com.ncclab.tsubaki.ui.viewmodel
 
+import android.graphics.Bitmap
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -22,6 +23,9 @@ class ScannerViewModel @Inject constructor(
     private val _scanResult = MutableStateFlow<ScanResult?>(null)
     val scanResult = _scanResult.asStateFlow()
 
+    private val _currentEngine = MutableStateFlow(featureFlagProvider.getActiveEngine())
+    val currentEngine = _currentEngine.asStateFlow()
+
     val analyzer = repository.analyzer
 
     init {
@@ -37,10 +41,15 @@ class ScannerViewModel @Inject constructor(
 
     fun setEngine(engine: EngineType) {
         featureFlagProvider.setActiveEngine(engine)
-        repository.resetScanner() // 重置扫描器以在下次分析时使用新引擎
+        _currentEngine.value = engine
+        repository.resetScanner()
     }
 
     fun clearResult() {
         _scanResult.value = null
+    }
+
+    fun scanFromBitmap(bitmap: Bitmap) {
+        repository.scanFromBitmap(bitmap)
     }
 }

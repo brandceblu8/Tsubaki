@@ -10,7 +10,8 @@ class ScannerFactory @Inject constructor() {
     fun create(engineType: EngineType): ScannerStrategy {
         return when (engineType) {
             EngineType.ML_KIT -> MLKitScannerStrategy()
-            EngineType.ZXING -> ZXingScannerStrategy()
+//            EngineType.ZXING -> ZXingScannerStrategy()
+            EngineType.ZXING -> MLKitScannerStrategy()
         }
     }
 }

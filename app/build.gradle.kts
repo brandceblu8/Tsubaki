@@ -65,7 +65,7 @@ dependencies {
     debugImplementation(libs.androidx.ui.test.manifest)
 
     // CameraX for camera preview and analysis
-    val cameraxVersion = "1.3.4"
+    val cameraxVersion = "1.5.0"
     implementation(libs.androidx.camera.core)
     implementation("androidx.camera:camera-camera2:${cameraxVersion}")
     implementation("androidx.camera:camera-lifecycle:${cameraxVersion}")
@@ -84,8 +84,10 @@ dependencies {
 
     // Accompanist for Permissions
     implementation("com.google.accompanist:accompanist-permissions:0.34.0")
+    implementation("androidx.navigation:navigation-compose:2.9.5")
 
-    implementation("androidx.navigation:navigation-compose:2.7.7")
+    // for material design icons
+    implementation("androidx.compose.material:material-icons-extended:1.7.8")
 }
 
 kapt {
