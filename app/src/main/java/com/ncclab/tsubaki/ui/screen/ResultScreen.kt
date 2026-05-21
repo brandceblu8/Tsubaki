@@ -30,8 +30,6 @@ import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Sms
 import androidx.compose.material.icons.filled.Wifi
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -43,6 +41,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -72,6 +72,19 @@ fun ResultScreen(
     val parsed = remember(rawValue) { QrContentParser.parse(rawValue) }
     val scrollBehavior = TopAppBarDefaults.enterAlwaysScrollBehavior()
 
+    // Only check the package manager for the platform that this QR actually
+    // belongs to. The result drives button visibility so the user does not
+    // see "使用微信打开" on a phone without WeChat installed and only find
+    // out after tapping.
+    val platformInstalled = remember(parsed) {
+        when (parsed) {
+            is QrContent.WeChat -> PlatformLauncher.isPackageInstalled(context, PlatformLauncher.PKG_WECHAT)
+            is QrContent.Qq -> PlatformLauncher.isPackageInstalled(context, PlatformLauncher.PKG_QQ)
+            is QrContent.Alipay -> PlatformLauncher.isPackageInstalled(context, PlatformLauncher.PKG_ALIPAY)
+            else -> false
+        }
+    }
+
     Scaffold(
         modifier = Modifier
             .fillMaxSize()
@@ -96,6 +109,7 @@ fun ResultScreen(
             format = format,
             rawValue = rawValue,
             parsed = parsed,
+            platformInstalled = platformInstalled,
             onCopy = {
                 clipboardManager.setText(AnnotatedString(rawValue))
                 Toast.makeText(context, "已复制到剪贴板", Toast.LENGTH_SHORT).show()
@@ -149,6 +163,7 @@ private fun ResultBody(
     format: String,
     rawValue: String,
     parsed: QrContent,
+    platformInstalled: Boolean,
     onCopy: () -> Unit,
     onCopyText: (String, String) -> Unit,
     onShare: () -> Unit,
@@ -197,36 +212,62 @@ private fun ResultBody(
                     }
                 }
                 is QrContent.WeChat -> {
-                    Button(onClick = { onLaunchInWeChat(parsed.rawValue) }) {
-                        LeadingIcon(Icons.AutoMirrored.Filled.OpenInNew)
-                        Text("使用微信打开")
-                    }
-                    if (looksLikeHttp(parsed.rawValue)) {
-                        OutlinedButton(onClick = { onOpenInBrowser(parsed.rawValue) }) {
+                    val isHttp = looksLikeHttp(parsed.rawValue)
+                    if (platformInstalled) {
+                        Button(onClick = { onLaunchInWeChat(parsed.rawValue) }) {
+                            LeadingIcon(Icons.AutoMirrored.Filled.OpenInNew)
+                            Text("使用微信打开")
+                        }
+                        if (isHttp) {
+                            OutlinedButton(onClick = { onOpenInBrowser(parsed.rawValue) }) {
+                                LeadingIcon(Icons.Filled.OpenInBrowser)
+                                Text("在浏览器打开")
+                            }
+                        }
+                    } else if (isHttp) {
+                        // WeChat is not installed; fall back to the browser
+                        // as the primary action so the user has a working tap.
+                        Button(onClick = { onOpenInBrowser(parsed.rawValue) }) {
                             LeadingIcon(Icons.Filled.OpenInBrowser)
                             Text("在浏览器打开")
                         }
                     }
                 }
                 is QrContent.Qq -> {
-                    Button(onClick = { onLaunchInQq(parsed.rawValue) }) {
-                        LeadingIcon(Icons.AutoMirrored.Filled.OpenInNew)
-                        Text("使用QQ打开")
-                    }
-                    if (looksLikeHttp(parsed.rawValue)) {
-                        OutlinedButton(onClick = { onOpenInBrowser(parsed.rawValue) }) {
+                    val isHttp = looksLikeHttp(parsed.rawValue)
+                    if (platformInstalled) {
+                        Button(onClick = { onLaunchInQq(parsed.rawValue) }) {
+                            LeadingIcon(Icons.AutoMirrored.Filled.OpenInNew)
+                            Text("使用QQ打开")
+                        }
+                        if (isHttp) {
+                            OutlinedButton(onClick = { onOpenInBrowser(parsed.rawValue) }) {
+                                LeadingIcon(Icons.Filled.OpenInBrowser)
+                                Text("在浏览器打开")
+                            }
+                        }
+                    } else if (isHttp) {
+                        Button(onClick = { onOpenInBrowser(parsed.rawValue) }) {
                             LeadingIcon(Icons.Filled.OpenInBrowser)
                             Text("在浏览器打开")
                         }
                     }
                 }
                 is QrContent.Alipay -> {
-                    Button(onClick = { onLaunchInAlipay(parsed.rawValue) }) {
-                        LeadingIcon(Icons.AutoMirrored.Filled.OpenInNew)
-                        Text("使用支付宝打开")
-                    }
-                    if (looksLikeHttp(parsed.rawValue)) {
-                        OutlinedButton(onClick = { onOpenInBrowser(parsed.rawValue) }) {
+                    val isHttp = looksLikeHttp(parsed.rawValue)
+                    if (platformInstalled) {
+                        Button(onClick = { onLaunchInAlipay(parsed.rawValue) }) {
+                            LeadingIcon(Icons.AutoMirrored.Filled.OpenInNew)
+                            Text("使用支付宝打开")
+                        }
+                        if (isHttp) {
+                            OutlinedButton(onClick = { onOpenInBrowser(parsed.rawValue) }) {
+                                LeadingIcon(Icons.Filled.OpenInBrowser)
+                                Text("在浏览器打开")
+                            }
+                        }
+                    } else if (isHttp) {
+                        Button(onClick = { onOpenInBrowser(parsed.rawValue) }) {
                             LeadingIcon(Icons.Filled.OpenInBrowser)
                             Text("在浏览器打开")
                         }
@@ -283,14 +324,17 @@ private fun ResultBody(
 
 @Composable
 private fun CategoryChipRow(parsed: QrContent, format: String) {
-    AssistChip(
-        onClick = { /* informational only */ },
+    // Informational badge only — using SuggestionChip with `enabled = false`
+    // so screen readers do not announce it as an actionable affordance.
+    SuggestionChip(
+        onClick = { /* no-op; the chip is informational */ },
+        enabled = false,
         label = { Text(text = categoryLabel(parsed.category, format)) },
-        leadingIcon = {
+        icon = {
             Icon(
                 imageVector = categoryIcon(parsed.category),
                 contentDescription = null,
-                modifier = Modifier.size(AssistChipDefaults.IconSize),
+                modifier = Modifier.size(SuggestionChipDefaults.IconSize),
             )
         },
     )
@@ -317,7 +361,9 @@ private fun ContentCard(parsed: QrContent, rawValue: String) {
             when (parsed) {
                 is QrContent.Wifi -> {
                     LabelledRow(label = "网络名称 (SSID)", value = parsed.ssid)
-                    parsed.encryption?.let { LabelledRow(label = "加密方式", value = it) }
+                    parsed.encryption?.let {
+                        LabelledRow(label = "加密方式", value = encryptionLabel(it))
+                    }
                     parsed.password?.let { LabelledRow(label = "密码", value = it) }
                     LabelledRow(
                         label = "隐藏网络",
@@ -421,6 +467,25 @@ private fun categoryIcon(category: QrCategory): ImageVector = when (category) {
 private fun looksLikeHttp(value: String): Boolean {
     val lower = value.lowercase()
     return lower.startsWith("http://") || lower.startsWith("https://")
+}
+
+/**
+ * Map the raw `T:` token from a `WIFI:` QR code to a human-readable label.
+ * The standard tokens are `nopass`, `WPA` (covers WPA / WPA2 / WPA-PSK),
+ * `WPA2`, `WPA3`, `WEP` and `SAE`. Unknown tokens are returned unchanged so
+ * an unfamiliar value still appears under "加密方式" rather than disappearing.
+ */
+private fun encryptionLabel(raw: String): String {
+    return when (raw.trim().uppercase()) {
+        "NOPASS", "NONE", "" -> "无密码"
+        "WPA" -> "WPA / WPA2"
+        "WPA2" -> "WPA2"
+        "WPA3" -> "WPA3"
+        "WPA2-EAP", "WPA-EAP" -> "WPA2-EAP"
+        "WEP" -> "WEP"
+        "SAE" -> "WPA3 (SAE)"
+        else -> raw
+    }
 }
 
 private fun runIntent(context: android.content.Context, intent: Intent) {

@@ -26,6 +26,17 @@ class ScanningRepositoryImpl @Inject constructor(
     @Volatile
     private var detectionLatched = false
 
+    /**
+     * Monotonic counter bumped on every [resetScanner]. Each in-flight
+     * detection callback captures the value at dispatch time and
+     * [handleResults] discards results whose generation no longer matches
+     * the current one. This closes the race where a callback from the
+     * strategy that was just released arrives after the user switched
+     * engines and emits a stale result decoded by the previous engine.
+     */
+    @Volatile
+    private var generation: Long = 0L
+
     private val _scanResults = MutableStateFlow<List<ScanResult>>(emptyList())
     override val scanResults: Flow<List<ScanResult>> = _scanResults.asStateFlow()
 
@@ -35,16 +46,18 @@ class ScanningRepositoryImpl @Inject constructor(
             return@Analyzer
         }
 
+        val dispatchGeneration = generation
         ensureActiveScanner().analyze(imageProxy) { results ->
-            handleResults(results)
+            handleResults(results, dispatchGeneration)
         }
     }
 
     override fun scanFromBitmap(bitmap: Bitmap) {
         if (detectionLatched) return
 
+        val dispatchGeneration = generation
         ensureActiveScanner().analyzeImage(bitmap) { results ->
-            handleResults(results)
+            handleResults(results, dispatchGeneration)
         }
     }
 
@@ -53,6 +66,9 @@ class ScanningRepositoryImpl @Inject constructor(
         activeScanner = null
         activeEngine = null
         detectionLatched = false
+        // Bump the generation so any in-flight callback from the strategy
+        // we just released is recognised as stale by handleResults.
+        generation += 1
     }
 
     override fun acknowledgeResult() {
@@ -71,7 +87,10 @@ class ScanningRepositoryImpl @Inject constructor(
         return newScanner
     }
 
-    private fun handleResults(results: List<ScanResult>) {
+    private fun handleResults(results: List<ScanResult>, dispatchGeneration: Long) {
+        // Drop callbacks that were dispatched against a strategy which has
+        // since been released by resetScanner().
+        if (dispatchGeneration != generation) return
         if (detectionLatched) return
         if (results.isEmpty()) return
         detectionLatched = true
@@ -79,5 +98,12 @@ class ScanningRepositoryImpl @Inject constructor(
     }
 
     @VisibleForTesting
-    internal fun handleResultsForTest(results: List<ScanResult>) = handleResults(results)
+    internal val currentGeneration: Long
+        get() = generation
+
+    @VisibleForTesting
+    internal fun handleResultsForTest(
+        results: List<ScanResult>,
+        dispatchGeneration: Long = generation,
+    ) = handleResults(results, dispatchGeneration)
 }

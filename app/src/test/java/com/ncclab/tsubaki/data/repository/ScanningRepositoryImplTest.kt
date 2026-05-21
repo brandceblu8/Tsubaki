@@ -81,4 +81,34 @@ class ScanningRepositoryImplTest {
         repository.handleResultsForTest(emptyList())
         assertEquals(first, currentResults(repository))
     }
+
+    @Test
+    fun `resetScanner discards in-flight callbacks from the released strategy`() {
+        val repository = newRepository()
+        val stale = listOf(ScanResult("stale-from-old-engine", "QR_CODE", 1L))
+        val fresh = listOf(ScanResult("fresh-from-new-engine", "QR_CODE", 2L))
+
+        // Snapshot the generation that an in-flight analyze callback would
+        // have captured before the user switched engines.
+        val dispatchGeneration = repository.currentGeneration
+
+        // The user opens the engine dialog and confirms a switch. resetScanner
+        // releases the old strategy, clears the latch, and bumps the generation.
+        repository.resetScanner()
+
+        // The old strategy's success listener now lands. Without the
+        // generation check this would emit a result decoded by the engine
+        // the user just switched away from.
+        repository.handleResultsForTest(stale, dispatchGeneration = dispatchGeneration)
+
+        assertTrue(
+            "Stale callback from released strategy must be ignored",
+            currentResults(repository).isEmpty(),
+        )
+
+        // The next detection (using the freshly-selected engine) is dispatched
+        // against the new generation and is published normally.
+        repository.handleResultsForTest(fresh)
+        assertEquals(fresh, currentResults(repository))
+    }
 }

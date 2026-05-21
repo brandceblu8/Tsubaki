@@ -27,6 +27,19 @@ class QrContentParserTest {
     }
 
     @Test
+    fun wxpScheme_isWeChat() {
+        // WeChat Pay merchant code, common on printed receipts.
+        val result = QrContentParser.parse("wxp://f2f0bSXJL3K1xRmZW8xX")
+        assertTrue(result is QrContent.WeChat)
+    }
+
+    @Test
+    fun schemelessWeChatHost_isWeChat() {
+        val result = QrContentParser.parse("weixin.qq.com/r/abcdef")
+        assertTrue(result is QrContent.WeChat)
+    }
+
+    @Test
     fun qqHttps_isQq() {
         val result = QrContentParser.parse("https://qm.qq.com/cgi-bin/qm/qr?k=xyz")
         assertTrue(result is QrContent.Qq)
@@ -49,6 +62,12 @@ class QrContentParserTest {
     @Test
     fun alipayScheme_isAlipay() {
         val result = QrContentParser.parse("alipays://platformapi/startapp?appId=10000007")
+        assertTrue(result is QrContent.Alipay)
+    }
+
+    @Test
+    fun schemelessAlipayHost_isAlipay() {
+        val result = QrContentParser.parse("qr.alipay.com/abc123")
         assertTrue(result is QrContent.Alipay)
     }
 

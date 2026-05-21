@@ -20,7 +20,10 @@ object QrContentParser {
         "w.url.cn",
         "wx.tenpay.com",
     )
-    private val WECHAT_SCHEMES = listOf("weixin")
+    // `wxp://` is the WeChat Pay merchant code scheme commonly seen on
+    // printed receipts (`wxp://f2f0…`). It is owned by `com.tencent.mm`
+    // just like `weixin://`, so we treat it as a WeChat payload.
+    private val WECHAT_SCHEMES = listOf("weixin", "wxp")
 
     // QQ hosts and schemes
     private val QQ_HOSTS = listOf(
@@ -39,13 +42,16 @@ object QrContentParser {
     private val ALIPAY_SCHEMES = listOf("alipays", "alipay")
 
     /**
-     * Conservative URL pattern. Matches `http://`, `https://` or `ftp://`
-     * followed by at least one non-whitespace character. Bare hostnames
-     * without a scheme deliberately fall through to [QrContent.Text] so
-     * that ambiguous strings like "example.com" stay as text.
+     * Conservative URL pattern. Matches `http://` or `https://` followed by
+     * at least one non-whitespace character. `ftp://` is intentionally not
+     * recognised because the manifest does not declare an `ftp` VIEW intent
+     * and most phones lack an FTP handler, so a "Open in browser" button on
+     * an `ftp://` payload would just toast "无法打开". Bare hostnames without
+     * a scheme deliberately fall through to [QrContent.Text] so that
+     * ambiguous strings like "example.com" stay as text.
      */
     private val URL_PATTERN: Pattern = Pattern.compile(
-        "^(?i)(https?|ftp)://\\S+$"
+        "^(?i)https?://\\S+$"
     )
 
     fun parse(raw: String): QrContent {
@@ -113,8 +119,11 @@ object QrContentParser {
         for (scheme in schemes) {
             if (lower.startsWith("$scheme://")) return true
         }
-        // Only inspect host if the value looks like a real URI.
-        val host = safeHost(raw)?.lowercase()
+        // Inspect host for both schemed URIs (`https://qr.alipay.com/...`)
+        // and scheme-less hostnames (`qr.alipay.com/...`) commonly seen on
+        // printed materials. Suffix matching uses a leading `.` so spoofed
+        // hosts like `qm.qq.com.attacker.com` do not match.
+        val host = (safeHost(raw) ?: schemelessHost(raw))?.lowercase()
         if (host != null) {
             for (h in hosts) {
                 if (host == h || host.endsWith(".$h")) return true
@@ -132,6 +141,26 @@ object QrContentParser {
         } catch (_: Exception) {
             null
         }
+    }
+
+    /**
+     * Best-effort host extraction for inputs that have no `scheme://` prefix
+     * (e.g. `qr.alipay.com/abc` or `weixin.qq.com/r/xyz`). We only return
+     * something that looks like a hostname (contains a `.`, no whitespace,
+     * not just a path) so that arbitrary text like "hello world" still
+     * falls through to [QrContent.Text].
+     */
+    private fun schemelessHost(raw: String): String? {
+        if (raw.contains("://")) return null
+        if (raw.any { it.isWhitespace() }) return null
+        val end = raw.indexOfAny(charArrayOf('/', '?', '#'))
+        val candidate = if (end < 0) raw else raw.substring(0, end)
+        if (candidate.isEmpty() || !candidate.contains('.')) return null
+        // Reject obvious non-hostname tokens (a hostname has no ':' before
+        // a possible port, but for our purposes we only care about platform
+        // host suffix matching, which is alphabetic).
+        if (candidate.contains(':')) return null
+        return candidate
     }
 
     /**
