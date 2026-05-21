@@ -1,9 +1,10 @@
 package com.ncclab.tsubaki.data.repository
 
 import android.graphics.Bitmap
-import android.util.Log
+import androidx.annotation.VisibleForTesting
 import androidx.camera.core.ImageAnalysis
 import com.ncclab.tsubaki.data.feature.FeatureFlagProvider
+import com.ncclab.tsubaki.data.model.EngineType
 import com.ncclab.tsubaki.data.model.ScanResult
 import com.ncclab.tsubaki.data.scanner.factory.ScannerFactory
 import com.ncclab.tsubaki.data.scanner.strategy.ScannerStrategy
@@ -20,36 +21,63 @@ class ScanningRepositoryImpl @Inject constructor(
 ) : ScanningRepository {
 
     private var activeScanner: ScannerStrategy? = null
+    private var activeEngine: EngineType? = null
+
+    @Volatile
+    private var detectionLatched = false
 
     private val _scanResults = MutableStateFlow<List<ScanResult>>(emptyList())
     override val scanResults: Flow<List<ScanResult>> = _scanResults.asStateFlow()
 
     override val analyzer: ImageAnalysis.Analyzer = ImageAnalysis.Analyzer { imageProxy ->
-        if (activeScanner == null) {
-            activeScanner = scannerFactory.create(featureFlagProvider.getActiveEngine())
+        if (detectionLatched) {
+            imageProxy.close()
+            return@Analyzer
         }
 
-        activeScanner?.analyze(imageProxy) { results ->
-            if (results.isNotEmpty()) {
-                _scanResults.value = results
-            }
+        ensureActiveScanner().analyze(imageProxy) { results ->
+            handleResults(results)
         }
     }
 
     override fun scanFromBitmap(bitmap: Bitmap) {
-        if (activeScanner == null) {
-            activeScanner = scannerFactory.create(featureFlagProvider.getActiveEngine())
-        }
+        if (detectionLatched) return
 
-        activeScanner?.analyzeImage(bitmap) { results ->
-            if (results.isNotEmpty()) {
-                _scanResults.value = results
-            }
+        ensureActiveScanner().analyzeImage(bitmap) { results ->
+            handleResults(results)
         }
     }
 
     override fun resetScanner() {
         activeScanner?.release()
         activeScanner = null
+        activeEngine = null
+        detectionLatched = false
     }
+
+    override fun acknowledgeResult() {
+        detectionLatched = false
+        _scanResults.value = emptyList()
+    }
+
+    private fun ensureActiveScanner(): ScannerStrategy {
+        val scanner = activeScanner
+        if (scanner != null) return scanner
+
+        val engine = featureFlagProvider.getActiveEngine()
+        val newScanner = scannerFactory.create(engine)
+        activeScanner = newScanner
+        activeEngine = engine
+        return newScanner
+    }
+
+    private fun handleResults(results: List<ScanResult>) {
+        if (detectionLatched) return
+        if (results.isEmpty()) return
+        detectionLatched = true
+        _scanResults.value = results
+    }
+
+    @VisibleForTesting
+    internal fun handleResultsForTest(results: List<ScanResult>) = handleResults(results)
 }
