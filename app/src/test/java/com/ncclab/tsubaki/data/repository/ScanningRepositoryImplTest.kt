@@ -1,13 +1,18 @@
 package com.ncclab.tsubaki.data.repository
 
+import android.graphics.Bitmap
+import androidx.camera.core.ImageProxy
 import com.ncclab.tsubaki.data.feature.FeatureFlagProvider
 import com.ncclab.tsubaki.data.model.EngineType
 import com.ncclab.tsubaki.data.model.ScanResult
 import com.ncclab.tsubaki.data.scanner.factory.ScannerFactory
+import com.ncclab.tsubaki.data.scanner.strategy.ScannerStrategy
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class ScanningRepositoryImplTest {
 
@@ -110,5 +115,68 @@ class ScanningRepositoryImplTest {
         // against the new generation and is published normally.
         repository.handleResultsForTest(fresh)
         assertEquals(fresh, currentResults(repository))
+    }
+
+    @Test
+    fun `stale callback that lands DURING resetScanner is dropped before the latch is cleared`() {
+        // This test exercises the narrow interleaving the v2 review flagged:
+        // a callback from the released strategy fires partway through
+        // resetScanner. With the generation increment hoisted to the first
+        // statement of resetScanner, the in-flight reader observes G+1 and
+        // is dropped by the generation guard regardless of the latch state.
+        val repository = newRepository()
+        val stale = listOf(ScanResult("stale-during-reset", "QR_CODE", 1L))
+
+        // Drive resetScanner from a worker thread so the main thread can
+        // interleave a stale callback while the worker is parked inside
+        // the fake strategy's release().
+        val releaseEntered = CountDownLatch(1)
+        val releaseMayProceed = CountDownLatch(1)
+        val blockingStrategy = object : ScannerStrategy {
+            override fun analyze(imageProxy: ImageProxy, onResult: (List<ScanResult>) -> Unit) = Unit
+            override fun analyzeImage(bitmap: Bitmap, onResult: (List<ScanResult>) -> Unit) = Unit
+            override fun release() {
+                releaseEntered.countDown()
+                releaseMayProceed.await()
+            }
+        }
+        val activeScannerField = ScanningRepositoryImpl::class.java
+            .getDeclaredField("activeScanner")
+        activeScannerField.isAccessible = true
+        activeScannerField.set(repository, blockingStrategy)
+
+        // Capture the generation that an in-flight callback dispatched
+        // before the user tapped "switch engine" would have observed.
+        val dispatchGeneration = repository.currentGeneration
+
+        val resetThread = Thread {
+            repository.resetScanner()
+        }.apply { name = "test-resetScanner"; start() }
+
+        try {
+            assertTrue(
+                "resetScanner did not enter release() in time",
+                releaseEntered.await(2, TimeUnit.SECONDS),
+            )
+
+            // The worker thread is now parked inside release(). With the
+            // hoisted increment, generation has already been bumped past
+            // the dispatch value — but the latch (had it been set) would
+            // not yet be cleared. Either way, the generation guard must
+            // drop the stale callback.
+            assertTrue(
+                "Generation must already be bumped by the time release() is reached",
+                repository.currentGeneration != dispatchGeneration,
+            )
+            repository.handleResultsForTest(stale, dispatchGeneration = dispatchGeneration)
+
+            assertTrue(
+                "Stale callback that landed during resetScanner must be dropped",
+                currentResults(repository).isEmpty(),
+            )
+        } finally {
+            releaseMayProceed.countDown()
+            resetThread.join(2_000)
+        }
     }
 }

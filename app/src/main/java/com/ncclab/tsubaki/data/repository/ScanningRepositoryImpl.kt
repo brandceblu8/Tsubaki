@@ -62,13 +62,19 @@ class ScanningRepositoryImpl @Inject constructor(
     }
 
     override fun resetScanner() {
+        // Invariant: bump the generation BEFORE touching any other state.
+        //
+        // handleResults reads generation first and the latch second, so if we
+        // cleared the latch first an in-flight callback from the strategy we
+        // are about to release could observe a still-matching generation and
+        // a freshly-cleared latch and emit a stale result. Hoisting the
+        // increment guarantees any in-flight reader observes G+1 (and is
+        // dropped by the generation guard) before the latch is cleared.
+        generation += 1
         activeScanner?.release()
         activeScanner = null
         activeEngine = null
         detectionLatched = false
-        // Bump the generation so any in-flight callback from the strategy
-        // we just released is recognised as stale by handleResults.
-        generation += 1
     }
 
     override fun acknowledgeResult() {

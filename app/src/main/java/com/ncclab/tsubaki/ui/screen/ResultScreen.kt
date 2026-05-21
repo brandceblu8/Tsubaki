@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -41,12 +42,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SuggestionChip
-import androidx.compose.material3.SuggestionChipDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -132,6 +133,9 @@ fun ResultScreen(
             onLaunchInWeChat = { uri -> PlatformLauncher.launchInWeChat(context, uri) },
             onLaunchInQq = { uri -> PlatformLauncher.launchInQq(context, uri) },
             onLaunchInAlipay = { uri -> PlatformLauncher.launchInAlipay(context, uri) },
+            onPlatformMissing = { appName ->
+                Toast.makeText(context, "未安装$appName", Toast.LENGTH_SHORT).show()
+            },
             onSendEmail = { email ->
                 val mailUri = ("mailto:" + email.address).toUri()
                 val intent = Intent(Intent.ACTION_SENDTO, mailUri).apply {
@@ -171,6 +175,7 @@ private fun ResultBody(
     onLaunchInWeChat: (String) -> Unit,
     onLaunchInQq: (String) -> Unit,
     onLaunchInAlipay: (String) -> Unit,
+    onPlatformMissing: (String) -> Unit,
     onSendEmail: (QrContent.Email) -> Unit,
     onDialPhone: (String) -> Unit,
     onSendSms: (QrContent.Sms) -> Unit,
@@ -231,6 +236,16 @@ private fun ResultBody(
                             LeadingIcon(Icons.Filled.OpenInBrowser)
                             Text("在浏览器打开")
                         }
+                    } else {
+                        // App missing AND the payload is a pure platform
+                        // scheme (e.g. wxp://, weixin://). Render a visible
+                        // affordance that explains the absence on tap so the
+                        // user is not left wondering why no platform action
+                        // appeared next to Copy / Share.
+                        OutlinedButton(onClick = { onPlatformMissing("微信") }) {
+                            LeadingIcon(Icons.AutoMirrored.Filled.OpenInNew)
+                            Text("使用微信打开（未安装）")
+                        }
                     }
                 }
                 is QrContent.Qq -> {
@@ -251,6 +266,11 @@ private fun ResultBody(
                             LeadingIcon(Icons.Filled.OpenInBrowser)
                             Text("在浏览器打开")
                         }
+                    } else {
+                        OutlinedButton(onClick = { onPlatformMissing("QQ") }) {
+                            LeadingIcon(Icons.AutoMirrored.Filled.OpenInNew)
+                            Text("使用QQ打开（未安装）")
+                        }
                     }
                 }
                 is QrContent.Alipay -> {
@@ -270,6 +290,11 @@ private fun ResultBody(
                         Button(onClick = { onOpenInBrowser(parsed.rawValue) }) {
                             LeadingIcon(Icons.Filled.OpenInBrowser)
                             Text("在浏览器打开")
+                        }
+                    } else {
+                        OutlinedButton(onClick = { onPlatformMissing("支付宝") }) {
+                            LeadingIcon(Icons.AutoMirrored.Filled.OpenInNew)
+                            Text("使用支付宝打开（未安装）")
                         }
                     }
                 }
@@ -324,20 +349,32 @@ private fun ResultBody(
 
 @Composable
 private fun CategoryChipRow(parsed: QrContent, format: String) {
-    // Informational badge only — using SuggestionChip with `enabled = false`
-    // so screen readers do not announce it as an actionable affordance.
-    SuggestionChip(
-        onClick = { /* no-op; the chip is informational */ },
-        enabled = false,
-        label = { Text(text = categoryLabel(parsed.category, format)) },
-        icon = {
+    // Static category badge. M3 chips (Suggestion / Assist / Filter / Input)
+    // all imply actionability or selection, so use a Surface shaped like a
+    // chip instead. This keeps the visual weight of the previous chip while
+    // making the affordance unambiguously informational for screen readers.
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        tonalElevation = 1.dp,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
             Icon(
                 imageVector = categoryIcon(parsed.category),
                 contentDescription = null,
-                modifier = Modifier.size(SuggestionChipDefaults.IconSize),
+                modifier = Modifier.size(18.dp),
             )
-        },
-    )
+            Text(
+                text = categoryLabel(parsed.category, format),
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
+    }
 }
 
 @Composable
@@ -481,7 +518,8 @@ private fun encryptionLabel(raw: String): String {
         "WPA" -> "WPA / WPA2"
         "WPA2" -> "WPA2"
         "WPA3" -> "WPA3"
-        "WPA2-EAP", "WPA-EAP" -> "WPA2-EAP"
+        "WPA-EAP" -> "WPA-EAP (企业)"
+        "WPA2-EAP" -> "WPA2-EAP (企业)"
         "WEP" -> "WEP"
         "SAE" -> "WPA3 (SAE)"
         else -> raw
