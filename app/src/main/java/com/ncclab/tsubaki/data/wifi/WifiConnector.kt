@@ -7,7 +7,7 @@ import android.net.wifi.WifiNetworkSuggestion
 import android.os.Build
 import android.provider.Settings
 import androidx.annotation.RequiresApi
-import com.ncclab.tsubaki.data.model.ParsedPayload
+import com.ncclab.tsubaki.data.parser.QrContent
 
 /**
  * 连接 Wi-Fi 的推荐方式：
@@ -24,7 +24,7 @@ object WifiConnector {
         data class Failed(val message: String) : Result()
     }
 
-    fun connect(context: Context, wifi: ParsedPayload.Wifi): Result {
+    fun connect(context: Context, wifi: QrContent.Wifi): Result {
         return when {
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> connectViaAddNetworks(context, wifi)
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> connectViaSuggestions(context, wifi)
@@ -33,7 +33,7 @@ object WifiConnector {
     }
 
     @RequiresApi(Build.VERSION_CODES.R)
-    private fun connectViaAddNetworks(context: Context, wifi: ParsedPayload.Wifi): Result {
+    private fun connectViaAddNetworks(context: Context, wifi: QrContent.Wifi): Result {
         return try {
             val suggestion = buildSuggestion(wifi)
             val intent = Intent(Settings.ACTION_WIFI_ADD_NETWORKS).apply {
@@ -51,7 +51,7 @@ object WifiConnector {
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
-    private fun connectViaSuggestions(context: Context, wifi: ParsedPayload.Wifi): Result {
+    private fun connectViaSuggestions(context: Context, wifi: QrContent.Wifi): Result {
         return try {
             val wifiManager = context.applicationContext
                 .getSystemService(Context.WIFI_SERVICE) as WifiManager
@@ -70,22 +70,34 @@ object WifiConnector {
     }
 
     @RequiresApi(Build.VERSION_CODES.Q)
-    private fun buildSuggestion(wifi: ParsedPayload.Wifi): WifiNetworkSuggestion {
+    private fun buildSuggestion(wifi: QrContent.Wifi): WifiNetworkSuggestion {
         val builder = WifiNetworkSuggestion.Builder()
             .setSsid(wifi.ssid)
             .setIsHiddenSsid(wifi.hidden)
 
-        when (wifi.security) {
-            ParsedPayload.Wifi.Security.WPA -> {
-                if (wifi.password.isNotEmpty()) builder.setWpa2Passphrase(wifi.password)
-            }
-            ParsedPayload.Wifi.Security.WEP -> {
+        val pwd = wifi.password.orEmpty()
+        when (normalizeEncryption(wifi.encryption)) {
+            EncryptionMode.WPA3 -> if (pwd.isNotEmpty()) builder.setWpa3Passphrase(pwd)
+            EncryptionMode.WPA -> if (pwd.isNotEmpty()) builder.setWpa2Passphrase(pwd)
+            EncryptionMode.WEP -> {
                 // WEP 在新版 API 已不再支持，按 WPA2 兜底（不一定能连上，由系统决定）
-                if (wifi.password.isNotEmpty()) builder.setWpa2Passphrase(wifi.password)
+                if (pwd.isNotEmpty()) builder.setWpa2Passphrase(pwd)
             }
-            ParsedPayload.Wifi.Security.NONE -> { /* open network */ }
+            EncryptionMode.NONE -> { /* open network */ }
         }
         return builder.build()
+    }
+
+    private enum class EncryptionMode { WPA3, WPA, WEP, NONE }
+
+    private fun normalizeEncryption(token: String?): EncryptionMode {
+        return when (token?.trim()?.uppercase()) {
+            "WPA3", "SAE" -> EncryptionMode.WPA3
+            "WPA", "WPA2", "WPA/WPA2", "WPA-PSK", "WPA2-PSK", "WPA-EAP", "WPA2-EAP" -> EncryptionMode.WPA
+            "WEP" -> EncryptionMode.WEP
+            "NOPASS", "NONE", null, "" -> EncryptionMode.NONE
+            else -> EncryptionMode.WPA
+        }
     }
 
     private fun openWifiSettings(context: Context, message: String): Result {

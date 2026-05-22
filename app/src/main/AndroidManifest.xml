@@ -12,7 +12,8 @@
     <!--
       Android 11 (API 30) 之后默认无法看到其他应用。这里声明我们要查询的
       ACTION_VIEW 处理器（http/https/自定义 scheme），否则 Intent.createChooser
-      可能只列出浏览器，无法把链接交给微信/QQ/淘宝等应用。
+      可能只列出浏览器，setPackage 也会判定 ActivityNotFound，
+      无法把链接交给微信/QQ/支付宝等应用。
     -->
     <queries>
         <intent>
@@ -26,11 +27,52 @@
             <data android:scheme="https" />
         </intent>
         <intent>
-            <action android:name="android.intent.action.VIEW" />
-        </intent>
-        <intent>
             <action android:name="android.intent.action.SEND" />
             <data android:mimeType="text/plain" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.DIAL" />
+            <data android:scheme="tel" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="mailto" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SENDTO" />
+            <data android:scheme="smsto" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="geo" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="weixin" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="wxp" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="mqqapi" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="mqq" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="tencent" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="alipays" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="alipay" />
         </intent>
     </queries>
 
